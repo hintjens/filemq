@@ -310,7 +310,7 @@ sub_patch_add (sub_t *self, fmq_patch_t *patch)
         existing = (fmq_patch_t *) zlist_next (self->client->patches);
     }
     //  Track that we've queued patch for client, so we don't do it twice
-    zhash_insert (self->cache, fmq_patch_digest (patch), fmq_patch_virtual (patch));
+    zhash_insert (self->cache, fmq_patch_digest (patch), strdup(fmq_patch_virtual (patch)));
     zlist_append (self->client->patches, fmq_patch_dup (patch));
 }
 
