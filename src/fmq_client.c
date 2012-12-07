@@ -165,6 +165,31 @@ fmq_client_set_resync (fmq_client_t *self, long enabled)
     zstr_sendf (self->pipe, "%ld", enabled);
 }
 
+//  --------------------------------------------------------------------------
+
+struct _s_delivery_args {
+	void *pipe;
+	char *inbox;
+	char *filename;
+};
+
+typedef struct _s_delivery_args s_delivery_args;
+
+static void* 
+s_notify_delivery (void *args)
+{
+    assert (args);
+		s_delivery_args *s = (s_delivery_args*) args;
+
+		zstr_sendm (s->pipe, "DELIVER");                                       
+		zstr_sendf (s->pipe, "%s", s->filename);                                        
+		zstr_sendf (s->pipe, "%s/%s", s->inbox, s->filename);                        
+		free(s->filename);
+		free(s->inbox);
+		free(args);
+
+		return 0;
+}
 
 //  ---------------------------------------------------------------------
 //  State machine constants
@@ -459,11 +484,13 @@ process_the_patch (client_t *self)
             self->credit -= fmq_chunk_size (chunk);                                   
         }                                                                             
         else {                                                                        
-            //  Zero-sized chunk means end of file, so report back to caller          
-            zstr_sendm (self->pipe, "DELIVER");                                       
-            zstr_sendm (self->pipe, filename);                                        
-            zstr_sendf (self->pipe, "%s/%s", inbox, filename);                        
-            fmq_file_destroy (&self->file);                                           
+					//  Zero-sized chunk means end of file, so report back to caller          
+					s_delivery_args *args = zmalloc(sizeof(s_delivery_args));
+					args->pipe = self->pipe;
+					args->inbox = strdup(inbox);
+					args->filename = strdup(filename);
+					zthread_new(s_notify_delivery, (void*)args);
+					fmq_file_destroy (&self->file);                                           
         }                                                                             
         fmq_chunk_destroy (&chunk);                                                   
     }                                                                                 
@@ -755,6 +782,7 @@ control_message (client_t *self)
     free (method);
     zmsg_destroy (&msg);
 
+		
     if (self->next_event)
         client_execute (self, self->next_event);
 }
@@ -807,6 +835,7 @@ client_thread (void *args, zctx_t *ctx, void *pipe)
             { self->pipe, 0, ZMQ_POLLIN, 0 },
             { self->dealer, 0, ZMQ_POLLIN, 0 }
         };
+	
         int poll_size = self->dealer? 2: 1;
         if (zmq_poll (items, poll_size, self->heartbeat * ZMQ_POLL_MSEC) == -1)
             break;              //  Context has been shut down
